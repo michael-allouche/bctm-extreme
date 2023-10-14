@@ -94,7 +94,7 @@ It consists of n=628 claims (in 1000 NOK). Below the log quantile-quantile plot 
 
 Consider a train-test split:
 
-- Our first objective is to compute the BCTM with power level a ∈ {1/2, 1} at the extreme risk level p_n = 1/⌈nξ⌉
+- Our first objective is to compute the BCTM with power level a ∈ {1/2, 1} at the extreme risk level $p_n = 1/\lceiln\xi\rceil$
 on the training set using the five above competitors and to compare the results with the empirical estimation.
 ```
   xviz.xes_real_bias_plot(a=1, xi=0.9)
@@ -114,4 +114,3 @@ xviz.xes_real_cte_half(xi=0.9)
 
 
 ## Citing
-}
