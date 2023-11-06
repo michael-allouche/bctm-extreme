@@ -1,6 +1,6 @@
 # bctm-extreme
 
-# Reduced-bias estimation of the extreme conditional tail  expectation for Box-Cox transforms of heavy-tailed distributionse, 2023
+# Reduced-bias estimation of the extreme conditional tail  expectation for Box-Cox transforms of heavy-tailed distributions, 2023
 Implementation of the paper ["Reduced-bias estimation of the extreme conditional tail  expectation for Box-Cox transforms of heavy-tailed distributions"](https://hal.inria.fr/hal-03266676v3/document),
 by [Michaël Allouche](www.linkedin.com/in/michaël-allouche-3049b7108),  [Jonathan El Methni](https://scholar.google.fr/citations?user=JjjH8N8AAAAJ&hl=fr) and [Stéphane Girard](http://mistis.inrialpes.fr/people/girard/).
 
