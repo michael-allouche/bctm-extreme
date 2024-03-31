@@ -1,7 +1,6 @@
 from turtle import color
 import numpy as np
 import pandas as pd
-import torch
 import matplotlib.pyplot as plt
 import seaborn as sns
 from IPython import display
