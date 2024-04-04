@@ -115,7 +115,7 @@ def xes_mse_paper_plot(criteria="mad", metric="median", graph="bias", saved=Fals
         dict_evt = np.load(Path(pathdir, "evt_estimators_rep{}_ndata{}_zeta{}.npy".format(n_replications, n_data, zeta)), allow_pickle=True)[()]
     except FileNotFoundError:
         print("Training EVT estimators ...")
-        dict_evt = evt_estimators(n_replications, n_data, zeta, summary_file["distribution"], summary_file["params"], return_full=True,
+        dict_evt = sim_estimators(n_replications, n_data, zeta, summary_file["distribution"], summary_file["params"], return_full=True,
                                   metric=metric)
     # ---------------
 
@@ -328,7 +328,7 @@ def real_hill_plot(saved=False):
     bestK = random_forest_k(np.array(hill_gammas), n_forests=10000, seed=42)
 
     axes[0, 0].plot(anchor_points, hill_gammas, color="black")
-    axes[0, 0].scatter(bestK, hill_gammas[bestK], s=200, color="red", marker="^", edgecolor="black")
+    axes[0, 0].scatter(bestK, hill_gammas[bestK], s=200, color="red", marker="^", edgecolor="black")  # +anchor_points[0] should have
     print("\hat\gamma(k^\star={})={}".format(bestK+anchor_points[0], hill_gammas[bestK]))
     # axes[0, 0].plot(anchor_points_prime, hill_gammas_prime, color="red")
 
@@ -458,48 +458,7 @@ def xes_real_bias_plot(a, xi, zeta=0, metric="median", saved=False):
         plt.savefig("imgs/real/bias-a{}_xi{}_zeta{}.eps".format(a, xi, zeta), format="eps")
     return
 
-def xes_real_cte_half(xi, zeta=0, gamma_estimator="hill", metric="median"):
-    """Bias plot estimators extreme ES plot real data at level 1/n"""
-    a = 0.5
-    X = pd.read_csv("data/real/norwegian90.csv")
-    n = X.shape[0]
 
-
-    Xtrain = X[:int(np.floor(xi * n))].to_numpy()
-    Xtest = X[-int(np.ceil((1 - xi) * n)):].to_numpy()
-    n_train = Xtrain.shape[0]
-    n_test = Xtest.shape[0]
-    # tail_estimator = TailIndexEstimator(X.to_numpy())
-    tail_estimator = TailIndexEstimator(Xtrain)
-
-    # anchor_points = np.arange(2, n)  # 2, ..., n-1
-    anchor_points = np.arange(2, n_train)  # 2, ..., n-1
-
-    if gamma_estimator == "hill":
-        gammas = [tail_estimator.hill(k_anchor) for k_anchor in anchor_points]
-    elif gamma_estimator == "hill_RB":
-        gammas = [tail_estimator.corrected_hill(k_anchor) for k_anchor in anchor_points]
-
-    bestK = random_forest_k(np.array(gammas), n_forests=10000, seed=42)
-    gamma = gammas[bestK]
-    print("Gamma estimation:", gamma)
-
-    real_cte = np.mean(Xtest)
-
-    # # EVT ESTIMATORS
-    # ---------------
-    dict_evt = real_estimators(a=a, xi=xi, zeta=zeta, return_full=True)
-    # ---------------
-
-    # # EVT ESTIMATORS
-    # # ---------------
-    dict_cte = {}
-    for estimator in dict_evt.keys():
-        bctm_bestK = dict_evt[estimator][metric]["q_bestK"]
-        # print(bctm_bestK)
-        dict_cte[estimator] = ((1-gamma/2) * (1 + np.array(bctm_bestK)/2))**2 / (1-gamma)
-    dict_cte["emp"] = real_cte
-    return dict_cte
 
 # ==================================================
 

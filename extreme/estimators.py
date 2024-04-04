@@ -7,8 +7,6 @@ from extreme.data_management import load_quantiles, DataSampler, load_real_data,
 import numpy as np
 from pathlib import Path
 
-# TODO: TO BE UPDATED
-# list_estimators = ["W", "RW", "CW", "CH", "CHp", "CHps", "PRBp", "PRBps"]
 list_estimators = ["D", "D_GRB","D_RB", "I", "I_RB"]
 
 # ==================================================
@@ -43,6 +41,10 @@ def get_gamma_hill(X):
 def best_gamma_hill(hill_gammas, n_forests=10000):
     bestK = random_forest_k(np.array(hill_gammas), n_forests=n_forests, seed=42)
     return hill_gammas[bestK-1]
+
+def get_gammaRB(X_order, k):
+    tail_estimator = TailIndexEstimator(X_order)
+    return tail_estimator.corrected_hill(k)
 
 
 def get_gamma_Rhill(hill_gammas, rho, n_data):
@@ -335,7 +337,7 @@ class ExtremeQuantileEstimator(TailIndexEstimator):
         return X_anchor * np.power(extrapolation_ratio, self.hill(k_anchor))
 
     def r_weissman(self, k_anchor):
-        """Revisited Weissman (RW)"""
+        """Refined Weissman (RW)"""
         X_anchor = self.X_order[-k_anchor]  # X_{n-k+1, n} for k=2,..., n-1
         extrapolation_ratio = k_anchor / (self.alpha * self.n_data)
         k_prime = k_anchor * np.power((-self.rho * np.log(extrapolation_ratio)) / ((1-self.rho) * (1 - np.power(extrapolation_ratio, self.rho))), 1/self.rho)
@@ -619,7 +621,7 @@ class ExtremeBCTM(ExtremeQuantileEstimator):
 def tree_k(x, a=None, c=None, return_var=False):
     """
     choice of the best k based on the dyadic decomposition.
-    returns the Python index (starts at 0). Add 2 to get the order level.
+    returns the Python index (starts at 0).
     """
     if a is None:
         a = 13
@@ -700,7 +702,7 @@ def sim_estimators(n_replications, n_data, risk_level, distribution, params, a, 
     pathdir.mkdir(parents=True, exist_ok=True)
     pathfile = Path(pathdir, "sim_estimators_rep{}_ndata{}_rlevel{}_zeta{}_a{}.npy".format(n_replications, n_data, risk_level, zeta, a))
 
-    anchor_points = np.arange(2 + int(zeta*n_data), n_data)  # 2, ..., n-1
+    anchor_points = np.arange(2 + int(zeta*n_data), n_data)  # 2+[zeta*n], ..., n-1
     data_sampler = DataSampler(distribution=distribution, params=params)
     real_bctm = data_sampler.ht_dist.box_conditional_tail_moment(risk_level, a)  # real CTM
 
@@ -712,14 +714,14 @@ def sim_estimators(n_replications, n_data, risk_level, distribution, params, a, 
         for replication in range(1, n_replications + 1):  # for each replication
             print("rep ", replication)
             X_order = load_quantiles(distribution, params, n_data, rep=replication)  # replication order statistics X_1,n, ..., X_n,n
-            dict_bctm = {estimator: [] for estimator in list_estimators}  # dict of quantiles
+            dict_bctm = {estimator: [] for estimator in list_estimators}  # dict of bctm
             evt_estimators = ExtremeBCTM(X=X_order, a=a, alpha=risk_level)
 
             for estimator in list_estimators:
                 for anchor_point in anchor_points:  # compute all quantile estimators
                     dict_bctm[estimator].append(evt_estimators.bctm_estimator(k_anchor=int(anchor_point), method=estimator))
 
-                bestK = random_forest_k(np.array(dict_bctm[estimator]), 10000)
+                bestK = random_forest_k(np.array(dict_bctm[estimator]), 10000)  # \in [1,n-2] under the python indexing
 
                 # MEAN
                 dict_evt[estimator]["mean"]["series"].append(dict_bctm[estimator])
@@ -753,6 +755,58 @@ def sim_estimators(n_replications, n_data, risk_level, distribution, params, a, 
     for estimator in list_estimators:
         df.loc["RMSE", estimator] = dict_evt[estimator][metric]["rmse_bestK"]
     return df
+
+
+def sim_coverage_probabilities(n_replications, n_data, risk_level, distribution, params, a, zeta=0., metric="median", return_full=False):
+    """Evaluation of the empirical coverage probabilities of confidence interval in (eq 18) associated to either
+    the estimator (D,RB) or (I,RB)"""
+
+    dict_res = {estimator: {"Lambda": [], "confidence_interval": [], "coverage_probability": []} for estimator in ["D_RB", "I_RB"]}
+
+    pathdir = Path("ckpt", "sim", distribution, str(params))
+    pathdir.mkdir(parents=True, exist_ok=True)
+    pathfile_coverage = Path(pathdir, "sim_coverage_rep{}_ndata{}_rlevel{}_zeta{}_a{}.npy".format(n_replications, n_data, risk_level, zeta, a))
+
+    anchor_points = np.arange(2 + int(zeta*n_data), n_data)  # 2+[zeta*n], ..., n-1
+    data_sampler = DataSampler(distribution=distribution, params=params)
+    real_bctm = data_sampler.ht_dist.box_conditional_tail_moment(risk_level, a)  # real CTM
+
+    try:
+        dict_res = np.load(pathfile_coverage, allow_pickle=True)[()]
+    except FileNotFoundError:
+        dict_estimators = sim_estimators(n_replications, n_data, risk_level, distribution, params, a, zeta=zeta, metric="median", return_full=True)
+        norm_dist = scipy.stats.norm()
+        q0_norm = norm_dist.ppf(1-0.05/2)  # fix alpha=0.05
+
+        # Estimators
+        # -----------------
+        for replication in range(1, n_replications + 1):  # for each replication
+            X_order = load_quantiles(distribution, params, n_data, rep=replication)  # replication order statistics X_1,n, ..., X_n,n
+            tail_estimator = TailIndexEstimator(X_order)
+
+            for estimator in ["D_RB", "I_RB"]:
+                bestK = dict_estimators[estimator][metric]['bestK'][replication-1]
+                gamma_RB = tail_estimator.corrected_hill(bestK)
+                dict_res[estimator]["Lambda"].append(q0_norm* gamma_RB *np.log(2*bestK) * (bestK**-0.5))
+
+                ci_inf, ci_sup = confidence_interval(X=dict_estimators[estimator][metric]["bctm_bestK"][replication-1][0], #[bestK],
+                                                     gamma=gamma_RB,
+                                                     k=bestK,
+                                                     a=a)
+
+                dict_res[estimator]["confidence_interval"].append((ci_inf, ci_sup))
+                dict_res[estimator]["coverage_probability"].append((ci_inf<= real_bctm<=ci_sup)[0])
+
+        # np.save(pathfile_coverage, dict_res)
+
+    if return_full:
+        return dict_res
+    df = pd.DataFrame(columns=["D_RB", "I_RB"], index=["Coverage"])
+    for estimator in ["D_RB", "I_RB"]:
+        df.loc["Coverage", estimator] = np.mean(dict_res[estimator]["coverage_probability"])
+    return df
+
+
 
 
 def real_estimators(a, xi, zeta=0, percentile=0, metric="median", return_full=False):
@@ -806,13 +860,13 @@ def real_estimators(a, xi, zeta=0, percentile=0, metric="median", return_full=Fa
 
         for estimator in list_estimators:
             # MEAN
-            dict_evt[estimator]["mean"]["var"] = np.array(dict_evt[estimator]["mean"]["series"]).var(axis=0)
+            # dict_evt[estimator]["mean"]["var"] = np.array(dict_evt[estimator]["mean"]["series"]).var(axis=0)
             dict_evt[estimator]["mean"]["rmse"] = ((np.array(dict_evt[estimator]["mean"]["series"]) / real_bctm - 1) ** 2).mean(axis=0)
             dict_evt[estimator]["mean"]["series"] = np.array(dict_evt[estimator]["mean"]["series"]).mean(axis=0)
             dict_evt[estimator]["mean"]["rmse_bestK"] = ((np.array(dict_evt[estimator]["mean"]["q_bestK"]) / real_bctm - 1) ** 2).mean()
 
             # MEDIAN
-            dict_evt[estimator]["median"]["var"] = np.array(dict_evt[estimator]["median"]["series"]).var(axis=0)
+            # dict_evt[estimator]["median"]["var"] = np.array(dict_evt[estimator]["median"]["series"]).var(axis=0)
             dict_evt[estimator]["median"]["rmse"] = np.median((np.array(dict_evt[estimator]["median"]["series"]) / real_bctm - 1) ** 2, axis=0)
             dict_evt[estimator]["median"]["series"] = np.median(dict_evt[estimator]["median"]["series"], axis=0)
             dict_evt[estimator]["median"]["rmse_bestK"] = np.median((np.array(dict_evt[estimator]["median"]["q_bestK"]) / real_bctm - 1) ** 2)
@@ -826,6 +880,59 @@ def real_estimators(a, xi, zeta=0, percentile=0, metric="median", return_full=Fa
         df.loc["RMSE", estimator] = dict_evt[estimator][metric]["rmse_bestK"]
     return df
 
+
+def confidence_interval(X, gamma, k, a, confidence_level=0.05):
+    """Computes the confidence interval around X according to (eq 18)"""
+    norm_dist = scipy.stats.norm()
+    q0_norm = norm_dist.ppf(1 - confidence_level / 2)  # fix alpha=0.05
+    Lamb = q0_norm * gamma * np.log(2 * k) * (k ** -0.5)
+    ci_inf = (X - Lamb) / (1 + (a * Lamb))
+    ci_sup = (X + Lamb) / (1 - (a * Lamb))
+    return ci_inf, ci_sup
+
+def get_real_cte_half(xi, zeta=0, gamma_estimator="hill", metric="median"):
+    """Bias plot estimators extreme ES plot real data at level 1/n"""
+    a = 0.5
+    X = pd.read_csv("data/real/norwegian90.csv")
+    n = X.shape[0]
+
+
+    Xtrain = X[:int(np.floor(xi * n))].to_numpy()
+    Xtest = X[-int(np.ceil((1 - xi) * n)):].to_numpy()
+    n_train = Xtrain.shape[0]
+    n_test = Xtest.shape[0]
+    # tail_estimator = TailIndexEstimator(X.to_numpy())
+    tail_estimator = TailIndexEstimator(Xtrain)
+
+    anchor_points = np.arange(2 + int(zeta*n_train), n_train) # 2, ..., n-1
+    # anchor_points = np.arange(2, n_train)  # 2, ..., n-1
+
+    if gamma_estimator == "hill":
+        gammas = [tail_estimator.hill(k_anchor) for k_anchor in anchor_points]
+    elif gamma_estimator == "hill_RB":
+        gammas = [tail_estimator.corrected_hill(k_anchor) for k_anchor in anchor_points]
+
+    bestK = random_forest_k(np.array(gammas), n_forests=10000, seed=42)
+    gamma = gammas[bestK]
+    print("Gamma estimation:", gamma)
+
+    real_cte = np.mean(Xtest)
+
+    # # EVT ESTIMATORS
+    # ---------------
+    dict_evt = real_estimators(a=a, xi=xi, zeta=zeta, return_full=True)
+    # ---------------
+
+    # # EVT ESTIMATORS
+    # # ---------------
+    dict_cte = {}
+    for estimator in dict_evt.keys():
+        bctm_bestK = dict_evt[estimator][metric]["q_bestK"]
+        # print(bctm_bestK)
+        dict_cte[estimator] = ((1-gamma/2) * (1 + np.array(bctm_bestK)/2))**2 / (1-gamma)
+    dict_cte["emp"] = real_cte
+    # return dict_cte, gamma, bestK
+    return dict_cte
 
 
 
